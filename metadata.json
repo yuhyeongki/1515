@@ -1,0 +1,6 @@
+{
+  "name": "우리반 시크릿 (Class Secret)",
+  "description": "우리반 친구들과 익명으로 비밀과 속마음을 나누는 인스타그램 스타일 비밀 피드, 선생님 안심 비밀 편지함 및 즐겨찾기 보관함",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
