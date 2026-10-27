@@ -10,6 +10,8 @@ interface HeaderProps {
   unreadLettersCount: number;
   onOpenCreateModal: () => void;
   onOpenLoginModal: () => void;
+  isSupabaseConfigured?: boolean;
+  onOpenSupabaseModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,6 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   unreadLettersCount,
   onOpenCreateModal,
   onOpenLoginModal,
+  isSupabaseConfigured,
+  onOpenSupabaseModal,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-neutral-200">
@@ -104,7 +108,22 @@ export const Header: React.FC<HeaderProps> = ({
         </nav>
 
         {/* Zone 3: 1 Primary Action + Profile Trigger */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {onOpenSupabaseModal && (
+            <button
+              onClick={onOpenSupabaseModal}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                isSupabaseConfigured
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-neutral-100 text-neutral-700 border-neutral-200 hover:bg-neutral-200'
+              }`}
+              title="Supabase 연동 상태 및 설정 가이드"
+            >
+              <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+              <span className="hidden sm:inline">{isSupabaseConfigured ? 'Supabase 연동됨' : 'Supabase 연결'}</span>
+            </button>
+          )}
+
           <button
             onClick={onOpenCreateModal}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-neutral-900 hover:bg-neutral-800 rounded-xl transition-all shadow-sm active:scale-[0.98] cursor-pointer whitespace-nowrap shrink-0"

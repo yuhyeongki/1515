@@ -44,6 +44,42 @@ import {
   addNotification,
   resetToDefaultData,
 } from './services/storage';
+import {
+  apiFetchPosts,
+  apiCreatePost,
+  apiToggleLike,
+  apiToggleBookmark,
+  apiAddComment,
+  apiDeletePost,
+  apiFetchStories,
+  apiCreateStory,
+  apiFetchLetters,
+  apiCreateLetter,
+  apiReplyLetter,
+  apiFetchNotifications,
+  apiCreateNotification,
+  apiMarkNotificationRead,
+  apiMarkAllNotificationsRead,
+  apiClearNotifications,
+} from './services/api';
+import { isSupabaseConfigured } from './lib/supabase';
+import {
+  fetchPostsFromSupabase,
+  createPostInSupabase,
+  toggleLikeInSupabase,
+  toggleBookmarkInSupabase,
+  addCommentInSupabase,
+  deletePostInSupabase,
+  fetchStoriesFromSupabase,
+  createStoryInSupabase,
+  fetchLettersFromSupabase,
+  createLetterInSupabase,
+  replyLetterInSupabase,
+  fetchNotificationsFromSupabase,
+  createNotificationInSupabase,
+  markNotificationReadInSupabase,
+  subscribeToSupabase,
+} from './services/supabaseService';
 
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -54,6 +90,7 @@ import { TeacherMailbox } from './components/TeacherMailbox';
 import { BookmarkVault } from './components/BookmarkVault';
 import { NotificationCenter } from './components/NotificationCenter';
 import { LoginModal } from './components/LoginModal';
+import { SupabaseStatusModal } from './components/SupabaseStatusModal';
 
 const CATEGORIES: PostCategory[] = [
   '전체',
@@ -85,6 +122,79 @@ export default function App() {
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+
+  // Sync to Database (Supabase if configured, or Server API / LocalStorage)
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadData() {
+      if (isSupabaseConfigured) {
+        const [sbPosts, sbStories, sbLetters, sbNotifs] = await Promise.all([
+          fetchPostsFromSupabase(),
+          fetchStoriesFromSupabase(),
+          fetchLettersFromSupabase(),
+          fetchNotificationsFromSupabase(currentUser.id),
+        ]);
+        if (!isMounted) return;
+        if (sbPosts && sbPosts.length > 0) {
+          setPosts(sbPosts);
+          savePosts(sbPosts);
+        }
+        if (sbStories && sbStories.length > 0) {
+          setStories(sbStories);
+          saveStories(sbStories);
+        }
+        if (sbLetters && sbLetters.length > 0) {
+          setTeacherLetters(sbLetters);
+          saveTeacherLetters(sbLetters);
+        }
+        if (sbNotifs && sbNotifs.length > 0) {
+          setNotifications(sbNotifs);
+          saveNotifications(sbNotifs);
+        }
+      } else {
+        const [remotePosts, remoteStories, remoteLetters, remoteNotifs] = await Promise.all([
+          apiFetchPosts(),
+          apiFetchStories(),
+          apiFetchLetters(),
+          apiFetchNotifications(currentUser.id),
+        ]);
+        if (!isMounted) return;
+        if (remotePosts && remotePosts.length > 0) {
+          setPosts(remotePosts);
+          savePosts(remotePosts);
+        }
+        if (remoteStories && remoteStories.length > 0) {
+          setStories(remoteStories);
+          saveStories(remoteStories);
+        }
+        if (remoteLetters && remoteLetters.length > 0) {
+          setTeacherLetters(remoteLetters);
+          saveTeacherLetters(remoteLetters);
+        }
+        if (remoteNotifs && remoteNotifs.length > 0) {
+          setNotifications(remoteNotifs);
+          saveNotifications(remoteNotifs);
+        }
+      }
+    }
+
+    loadData();
+
+    // Setup Supabase Realtime channel if configured
+    let unsubscribe = () => {};
+    if (isSupabaseConfigured) {
+      unsubscribe = subscribeToSupabase(() => {
+        loadData();
+      });
+    }
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [currentUser.id]);
 
   // Sync to localStorage
   const handleUpdateCurrentUser = (user: CurrentUser) => {
@@ -143,7 +253,11 @@ export default function App() {
     const next = [newPost, ...posts];
     updatePosts(next);
 
-    // Add local notification
+    // Call Cloud SQL / Server API & Supabase
+    apiCreatePost(newPost);
+    createPostInSupabase(newPost);
+
+    // Add notification
     const newNotif = addNotification({
       userId: currentUser.id,
       type: 'system',
@@ -152,10 +266,20 @@ export default function App() {
       targetId: newPost.id,
     });
     setNotifications((prev) => [newNotif, ...prev]);
+    apiCreateNotification(newNotif);
+    createNotificationInSupabase(newNotif);
   };
 
   // 2. Toggle Like (with notification to post author)
   const handleToggleLike = (postId: string) => {
+    // Call Cloud SQL API
+    apiToggleLike(postId, currentUser.id);
+
+    const post = posts.find((p) => p.id === postId);
+    if (post) {
+      toggleLikeInSupabase(postId, currentUser.id, post.likedBy, post.likes);
+    }
+
     const updated = posts.map((post) => {
       if (post.id === postId) {
         const hasLiked = post.likedBy.includes(currentUser.id);
@@ -174,6 +298,8 @@ export default function App() {
             targetId: post.id,
           });
           setNotifications((prev) => [newNotif, ...prev]);
+          apiCreateNotification(newNotif);
+          createNotificationInSupabase(newNotif);
         }
 
         return {
@@ -190,6 +316,13 @@ export default function App() {
 
   // 3. Toggle Bookmark
   const handleToggleBookmark = (postId: string) => {
+    apiToggleBookmark(postId, currentUser.id);
+
+    const post = posts.find((p) => p.id === postId);
+    if (post) {
+      toggleBookmarkInSupabase(postId, currentUser.id, post.bookmarkedBy, post.bookmarks);
+    }
+
     const updated = posts.map((post) => {
       if (post.id === postId) {
         const hasBookmarked = post.bookmarkedBy.includes(currentUser.id);
@@ -232,6 +365,9 @@ export default function App() {
       likedBy: [],
     };
 
+    apiAddComment(postId, newComment);
+    addCommentInSupabase(newComment);
+
     const updated = posts.map((p) => {
       if (p.id === postId) {
         return {
@@ -254,11 +390,15 @@ export default function App() {
         targetId: postId,
       });
       setNotifications((prev) => [newNotif, ...prev]);
+      apiCreateNotification(newNotif);
+      createNotificationInSupabase(newNotif);
     }
   };
 
   // 5. Delete Post
   const handleDeletePost = (postId: string) => {
+    apiDeletePost(postId);
+    deletePostInSupabase(postId);
     const updated = posts.filter((p) => p.id !== postId);
     updatePosts(updated);
   };
@@ -275,6 +415,8 @@ export default function App() {
       seen: false,
       theme,
     };
+    apiCreateStory(newStory);
+    createStoryInSupabase(newStory);
     updateStories([newStory, ...stories]);
   };
 
@@ -297,6 +439,8 @@ export default function App() {
       status: 'unread',
     };
 
+    apiCreateLetter(newLetter);
+    createLetterInSupabase(newLetter);
     updateLetters([newLetter, ...teacherLetters]);
 
     // Send notification for teacher
@@ -308,10 +452,15 @@ export default function App() {
       targetId: newLetter.id,
     });
     setNotifications((prev) => [newNotif, ...prev]);
+    apiCreateNotification(newNotif);
+    createNotificationInSupabase(newNotif);
   };
 
   // 8. Teacher Replies to Letter
   const handleReplyLetter = (letterId: string, replyContent: string) => {
+    apiReplyLetter(letterId, replyContent, currentUser.name);
+    replyLetterInSupabase(letterId, replyContent, currentUser.name);
+
     const updated = teacherLetters.map((l) => {
       if (l.id === letterId) {
         return {
@@ -340,21 +489,27 @@ export default function App() {
         targetId: letterId,
       });
       setNotifications((prev) => [newNotif, ...prev]);
+      apiCreateNotification(newNotif);
+      createNotificationInSupabase(newNotif);
     }
   };
 
   // 9. Notifications Management
   const handleMarkAsRead = (id: string) => {
+    apiMarkNotificationRead(id);
+    markNotificationReadInSupabase(id);
     const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
     updateNotifs(updated);
   };
 
   const handleMarkAllAsRead = () => {
+    apiMarkAllNotificationsRead();
     const updated = notifications.map((n) => ({ ...n, isRead: true }));
     updateNotifs(updated);
   };
 
   const handleClearNotifications = () => {
+    apiClearNotifications();
     updateNotifs([]);
   };
 
@@ -398,6 +553,8 @@ export default function App() {
         unreadLettersCount={unreadLettersCount}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        isSupabaseConfigured={isSupabaseConfigured}
+        onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
       />
 
       {/* 2. Main Content Canvas */}
@@ -639,6 +796,30 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Supabase Integration Card */}
+              <div className="bg-gradient-to-br from-neutral-900 to-neutral-800 text-white rounded-3xl p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                    <h3 className="text-xs font-bold">Supabase 클라우드 DB</h3>
+                  </div>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/10 text-white/90">
+                    {isSupabaseConfigured ? '실시간 동기화' : '설정 필요'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-300 leading-relaxed">
+                  {isSupabaseConfigured
+                    ? '현재 Supabase와 실시간(Realtime) 연결되어 모든 비밀 데이터가 클라우드에 영구 저장됩니다.'
+                    : 'Supabase 프로젝트 URL과 API 키를 .env에 입력하면 즉시 실시간 동기화가 활성화됩니다.'}
+                </p>
+                <button
+                  onClick={() => setIsSupabaseModalOpen(true)}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <span>{isSupabaseConfigured ? 'Supabase 연동 정보 보기' : 'Supabase 설정 가이드 & SQL'}</span>
+                </button>
+              </div>
+
               {/* Classroom Guidelines & Reset */}
               <div className="p-4 rounded-2xl bg-neutral-100/80 border border-neutral-200 text-neutral-600 text-[11px] space-y-2">
                 <div className="flex items-center gap-1.5 font-bold text-neutral-800">
@@ -724,6 +905,11 @@ export default function App() {
         onClose={() => setIsLoginModalOpen(false)}
         currentUser={currentUser}
         onSaveUser={handleUpdateCurrentUser}
+      />
+
+      <SupabaseStatusModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
       />
     </div>
   );
